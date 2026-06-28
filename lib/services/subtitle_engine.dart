@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -17,7 +15,7 @@ class SubtitleEngine extends ChangeNotifier {
   VADProcessor? _vad;
   WhisperSTTEngine? _stt;
   TranslateEngine? _trans;
-  StreamSubscription? _vadSub;
+  StreamSubscription<dynamic>? _vadSub;
 
   bool _running = false;
   bool get isRunning => _running;
@@ -71,7 +69,13 @@ class SubtitleEngine extends ChangeNotifier {
       },
     );
 
-    _vadSub = vad.sentenceStream.listen((sentence) async {
+    _vadSub = vad.sentenceStream.listen(_onSentence(stt, trans, lang));
+
+    notifyListeners();
+  }
+
+  void Function(List<int>) _onSentence(WhisperSTTEngine stt, TranslateEngine trans, String lang) {
+    return (sentence) async {
       try {
         _status = '识别中...';
         notifyListeners();
@@ -88,21 +92,19 @@ class SubtitleEngine extends ChangeNotifier {
         final translated = await trans.translate(text, lang);
         _translatedText = translated;
 
-        unawaited(_overlayChannel.invokeMethod('updateSubtitle', {
+        await _overlayChannel.invokeMethod('updateSubtitle', {
           'original': text,
           'translated': translated,
-        }));
+        });
 
         _status = '监听中...';
         notifyListeners();
       } catch (e) {
         final msg = e.toString();
-        _status = '错误: ${msg.substring(0, msg.length < 50 ? msg.length : 50)}';
+        _status = '错误: ${msg.length > 50 ? msg.substring(0, 50) : msg}';
         notifyListeners();
       }
-    });
-
-    notifyListeners();
+    };
   }
 
   Future<void> stop() async {
