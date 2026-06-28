@@ -17,6 +17,7 @@ class SubtitleEngine extends ChangeNotifier {
   WhisperSTTEngine? _stt;
   TranslateEngine? _trans;
   StreamSubscription? _vadSub;
+  String _lang = 'en';
 
   bool _running = false;
   bool get isRunning => _running;
@@ -50,6 +51,7 @@ class SubtitleEngine extends ChangeNotifier {
     );
 
     _vad = VADProcessor();
+    _lang = config.sourceLang == 'auto' ? 'en' : config.sourceLang;
 
     await _overlayChannel.invokeMethod('showOverlay');
     await audioStream.startCapture();
@@ -58,9 +60,6 @@ class SubtitleEngine extends ChangeNotifier {
     _status = '监听中...';
 
     final vad = _vad!;
-    final stt = _stt!;
-    final trans = _trans!;
-    final lang = config.sourceLang == 'auto' ? 'en' : config.sourceLang;
 
     audioStream.audioStream.listen(
       (Uint8List chunk) => vad.feed(chunk.toList()),
@@ -70,24 +69,25 @@ class SubtitleEngine extends ChangeNotifier {
       },
     );
 
-    _vadSub = vad.sentenceStream.listen((sentence) {
-      _processSentence(sentence, stt, trans, lang);
-    });
+    _vadSub = vad.sentenceStream.listen(_onSentence);
 
     notifyListeners();
   }
 
-  Future<void> _processSentence(
-    List<int> sentence,
-    WhisperSTTEngine stt,
-    TranslateEngine trans,
-    String lang,
-  ) async {
+  void _onSentence(List<int> sentence) {
+    _processSentence(sentence);
+  }
+
+  Future<void> _processSentence(List<int> sentence) async {
+    final stt = _stt;
+    final trans = _trans;
+    if (stt == null || trans == null) return;
+
     try {
       _status = '识别中...';
       notifyListeners();
 
-      final text = await stt.transcribe(sentence, lang);
+      final text = await stt.transcribe(sentence, _lang);
       if (text.isEmpty) return;
 
       _originalText = text;
@@ -96,7 +96,7 @@ class SubtitleEngine extends ChangeNotifier {
       _status = '翻译中...';
       notifyListeners();
 
-      final translated = await trans.translate(text, lang);
+      final translated = await trans.translate(text, _lang);
       _translatedText = translated;
 
       await _overlayChannel.invokeMethod('updateSubtitle', {
