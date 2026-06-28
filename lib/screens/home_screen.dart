@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/subtitle_engine.dart';
 import '../utils/config.dart';
 
@@ -10,7 +13,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late SubtitleEngine _engine;
 
   final _sttApiKeyCtrl = TextEditingController();
@@ -21,10 +24,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _sourceLang = 'auto';
   String _transEngine = 'google';
+  bool _resumingFromSettings = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _engine = SubtitleEngine(config: widget.config);
     _engine.addListener(_onEngineChanged);
     _sourceLang = widget.config.sourceLang;
@@ -34,6 +39,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _transApiKeyCtrl.text = widget.config.transApiKey;
     _transBaseUrlCtrl.text = widget.config.transBaseUrl;
     _transModelCtrl.text = widget.config.transModel;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_resumingFromSettings) return;
+    if (state == AppLifecycleState.resumed) {
+      _resumingFromSettings = false;
+      _startWithPermissions();
+    }
   }
 
   void _onEngineChanged() {
@@ -54,6 +68,80 @@ class _HomeScreenState extends State<HomeScreen> {
         const SnackBar(content: Text('设置已保存'), duration: Duration(seconds: 1)),
       );
     }
+  }
+
+  Future<bool> _ensureOverlayPermission() async {
+    if (!Platform.isAndroid) return true;
+
+    final status = await Permission.systemAlertWindow.status;
+    if (status.isGranted) return true;
+
+    if (!mounted) return false;
+
+    final shouldOpen = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('需要悬浮窗权限'),
+        content: const Text('实时字幕需要悬浮窗权限才能在其他应用上方显示翻译字幕。\n\n请在接下来的系统设置页面中允许该权限。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去开启')),
+        ],
+      ),
+    );
+
+    if (shouldOpen != true) return false;
+
+    await Permission.systemAlertWindow.request();
+    final granted = await Permission.systemAlertWindow.status;
+
+    if (!granted.isGranted && mounted) {
+      final openSettings = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('权限未开启'),
+          content: const Text('悬浮窗权限尚未开启，实时字幕无法显示。\n\n是否手动前往系统设置页面开启该权限？'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('暂不')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去设置')),
+          ],
+        ),
+      );
+
+      if (openSettings == true) {
+        await openAppSettings();
+        _resumingFromSettings = true;
+      }
+
+      return false;
+    }
+
+    return granted.isGranted;
+  }
+
+  Future<bool> _ensureNotificationPermission() async {
+    if (!Platform.isAndroid) return true;
+
+    final status = await Permission.notification.status;
+    if (status.isGranted) return true;
+
+    final requested = await Permission.notification.request();
+    return requested.isGranted;
+  }
+
+  Future<void> _startWithPermissions() async {
+    final overlayReady = await _ensureOverlayPermission();
+    if (!overlayReady) return;
+
+    final notificationReady = await _ensureNotificationPermission();
+    if (!notificationReady) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('通知权限未授予，Android 13+ 无法稳定运行前台服务')),
+      );
+    }
+
+    await _engine.start();
   }
 
   @override
@@ -131,7 +219,12 @@ class _HomeScreenState extends State<HomeScreen> {
       width: double.infinity,
       height: 52,
       child: ElevatedButton.icon(
-        onPressed: _engine.isRunning ? _engine.stop : _engine.start,
+        onPressed: _engine.isRunning
+            ? _engine.stop
+            : () async {
+                await _saveConfig();
+                await _startWithPermissions();
+              },
         icon: Icon(_engine.isRunning ? Icons.stop : Icons.play_arrow, size: 28),
         label: Text(
           _engine.isRunning ? '停止监听' : '开始监听',
@@ -286,6 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _engine.removeListener(_onEngineChanged);
     _sttApiKeyCtrl.dispose();
     _sttBaseUrlCtrl.dispose();

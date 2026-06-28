@@ -13,6 +13,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -30,47 +31,60 @@ class AudioCaptureService : Service() {
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val BUFFER_SIZE = 4096
 
+        private const val PLACEHOLDER_ORIGINAL = "等待识别..."
+        private const val PLACEHOLDER_TRANSLATED = "实时字幕准备中"
+
         @Volatile
         private var overlayView: View? = null
         private var windowManager: WindowManager? = null
-        private var originalText: TextView? = null
-        private var translatedText: TextView? = null
+        private var originalTextView: TextView? = null
+        private var translatedTextView: TextView? = null
 
         fun showOverlay(context: Context) {
-            if (overlayView != null) return
-            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            windowManager = wm
-
-            val layout = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.argb(140, 0, 0, 0)) // 半透明黑色底
-                setPadding(24, 12, 24, 12)
+            if (overlayView != null) {
+                updateSubtitle(PLACEHOLDER_ORIGINAL, PLACEHOLDER_TRANSLATED)
+                return
             }
 
-            originalText = TextView(context).apply {
-                text = ""
-                textSize = 16f
+            val appContext = context.applicationContext
+            val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            windowManager = wm
+
+            val layout = LinearLayout(appContext).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.argb(180, 0, 0, 0))
+                val hPad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 14f, appContext.resources.displayMetrics).toInt()
+                val vPad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10f, appContext.resources.displayMetrics).toInt()
+                setPadding(hPad, vPad, hPad, vPad)
+            }
+
+            originalTextView = TextView(appContext).apply {
+                text = PLACEHOLDER_ORIGINAL
+                textSize = 15f
                 setTextColor(Color.WHITE)
                 isSingleLine = false
                 maxLines = 2
             }
-            translatedText = TextView(context).apply {
-                text = ""
-                textSize = 20f
+            translatedTextView = TextView(appContext).apply {
+                text = PLACEHOLDER_TRANSLATED
+                textSize = 19f
                 setTextColor(Color.YELLOW)
                 isSingleLine = false
                 maxLines = 2
             }
 
-            layout.addView(originalText)
-            layout.addView(translatedText)
+            layout.addView(originalTextView)
+            layout.addView(translatedTextView)
+
+            val width = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 320f, appContext.resources.displayMetrics).toInt()
 
             val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                width,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else
+                    @Suppress("DEPRECATION")
                     WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -78,7 +92,7 @@ class AudioCaptureService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                y = 150
+                y = 160
             }
 
             overlayView = layout
@@ -86,19 +100,25 @@ class AudioCaptureService : Service() {
         }
 
         fun hideOverlay(context: Context) {
-            overlayView?.let {
-                windowManager?.removeView(it)
+            val view = overlayView ?: return
+            try {
+                windowManager?.removeView(view)
+            } catch (_: Throwable) {
+                // view 可能已被系统移除
             }
             overlayView = null
-            originalText = null
-            translatedText = null
+            originalTextView = null
+            translatedTextView = null
             windowManager = null
         }
 
         fun updateSubtitle(original: String, translated: String) {
-            originalText?.post {
-                originalText?.text = original
-                translatedText?.text = translated
+            val safeOriginal = original.ifBlank { PLACEHOLDER_ORIGINAL }
+            val safeTranslated = translated.ifBlank { PLACEHOLDER_TRANSLATED }
+
+            originalTextView?.post {
+                originalTextView?.text = safeOriginal
+                translatedTextView?.text = safeTranslated
             }
         }
     }
@@ -121,14 +141,21 @@ class AudioCaptureService : Service() {
 
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
 
         val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
-        val data = intent.getParcelableExtra<Intent>("data")
+        val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra("data", Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra("data")
+        }
+
         if (resultCode == Activity.RESULT_OK && data != null) {
+            showOverlay(this)
             startCapturing(resultCode, data)
         } else {
             MainActivity.instance?.sendCaptureError("Invalid MediaProjection data")
@@ -156,11 +183,13 @@ class AudioCaptureService : Service() {
 
             audioRecord = AudioRecord.Builder()
                 .setAudioPlaybackCaptureConfig(config)
-                .setAudioFormat(AudioFormat.Builder()
-                    .setEncoding(AUDIO_FORMAT)
-                    .setSampleRate(SAMPLE_RATE)
-                    .setChannelMask(CHANNEL_CONFIG)
-                    .build())
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AUDIO_FORMAT)
+                        .setSampleRate(SAMPLE_RATE)
+                        .setChannelMask(CHANNEL_CONFIG)
+                        .build()
+                )
                 .setBufferSizeInBytes(bufferSize)
                 .build()
 
@@ -193,6 +222,7 @@ class AudioCaptureService : Service() {
         audioRecord = null
         mediaProjection?.stop()
         mediaProjection = null
+        hideOverlay(this)
         super.onDestroy()
     }
 
