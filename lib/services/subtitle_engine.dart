@@ -9,7 +9,6 @@ import '../services/stt_engine.dart';
 import '../services/translate_engine.dart';
 import '../utils/config.dart';
 
-/// 字幕引擎：串联音频→VAD→STT→翻译→悬浮窗
 class SubtitleEngine extends ChangeNotifier {
   final AppConfig config;
   final AudioStreamService audioStream = AudioStreamService();
@@ -59,22 +58,25 @@ class SubtitleEngine extends ChangeNotifier {
     _running = true;
     _status = '监听中...';
 
+    final vad = _vad!;
+    final stt = _stt!;
+    final trans = _trans!;
+    final lang = config.sourceLang == 'auto' ? 'en' : config.sourceLang;
+
     audioStream.audioStream.listen(
-      (Uint8List chunk) => _vad?.feed(chunk.toList()),
+      (Uint8List chunk) => vad.feed(chunk.toList()),
       onError: (e) {
         _status = '错误: $e';
         notifyListeners();
       },
     );
 
-    final lang = config.sourceLang == 'auto' ? 'en' : config.sourceLang;
-
-    _vadSub = _vad!.sentenceStream.listen((sentence) async {
+    _vadSub = vad.sentenceStream.listen((sentence) async {
       try {
         _status = '识别中...';
         notifyListeners();
 
-        final text = await _stt!.transcribe(sentence, lang);
+        final text = await stt.transcribe(sentence, lang);
         if (text.isEmpty) return;
 
         _originalText = text;
@@ -83,19 +85,19 @@ class SubtitleEngine extends ChangeNotifier {
         _status = '翻译中...';
         notifyListeners();
 
-        final translated = await _trans!.translate(text, lang);
+        final translated = await trans.translate(text, lang);
         _translatedText = translated;
 
-        _overlayChannel.invokeMethod('updateSubtitle', {
+        unawaited(_overlayChannel.invokeMethod('updateSubtitle', {
           'original': text,
           'translated': translated,
-        });
+        }));
 
         _status = '监听中...';
         notifyListeners();
       } catch (e) {
         final msg = e.toString();
-        _status = '错误: ${msg.substring(0, min(msg.length, 50))}';
+        _status = '错误: ${msg.substring(0, msg.length < 50 ? msg.length : 50)}';
         notifyListeners();
       }
     });
