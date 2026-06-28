@@ -3,7 +3,9 @@ package com.example.realtimesubtitle
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -50,25 +52,27 @@ class AudioCaptureService : Service() {
             val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             windowManager = wm
 
+            // 背景完全透明的容器
             val layout = LinearLayout(appContext).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.argb(180, 0, 0, 0))
-                val hPad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 14f, appContext.resources.displayMetrics).toInt()
-                val vPad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10f, appContext.resources.displayMetrics).toInt()
+                setBackgroundColor(Color.TRANSPARENT)
+                val hPad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20f, appContext.resources.displayMetrics).toInt()
+                val vPad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8f, appContext.resources.displayMetrics).toInt()
                 setPadding(hPad, vPad, hPad, vPad)
             }
 
-            originalTextView = TextView(appContext).apply {
+            // 带黑色描边的白色字幕，保证在任何背景下都可读
+            originalTextView = StrokedTextView(appContext).apply {
                 text = PLACEHOLDER_ORIGINAL
                 textSize = 15f
                 setTextColor(Color.WHITE)
                 isSingleLine = false
                 maxLines = 2
             }
-            translatedTextView = TextView(appContext).apply {
+            translatedTextView = StrokedTextView(appContext).apply {
                 text = PLACEHOLDER_TRANSLATED
                 textSize = 19f
-                setTextColor(Color.YELLOW)
+                setTextColor(Color.parseColor("#FFFFF3B0")) // 柔黄
                 isSingleLine = false
                 maxLines = 2
             }
@@ -76,10 +80,8 @@ class AudioCaptureService : Service() {
             layout.addView(originalTextView)
             layout.addView(translatedTextView)
 
-            val width = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 320f, appContext.resources.displayMetrics).toInt()
-
             val params = WindowManager.LayoutParams(
-                width,
+                WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -88,11 +90,13 @@ class AudioCaptureService : Service() {
                     WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                y = 160
+                y = 180
+                horizontalMargin = 0.04f
             }
 
             overlayView = layout
@@ -103,9 +107,7 @@ class AudioCaptureService : Service() {
             val view = overlayView ?: return
             try {
                 windowManager?.removeView(view)
-            } catch (_: Throwable) {
-                // view 可能已被系统移除
-            }
+            } catch (_: Throwable) {}
             overlayView = null
             originalTextView = null
             translatedTextView = null
@@ -120,6 +122,35 @@ class AudioCaptureService : Service() {
                 originalTextView?.text = safeOriginal
                 translatedTextView?.text = safeTranslated
             }
+        }
+    }
+
+    // ── 描边 TextView：白字黑边，在任何背景下都清晰可读 ──
+    private class StrokedTextView(context: Context) : TextView(context) {
+        private val strokePaint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            color = Color.argb(180, 0, 0, 0)
+            isAntiAlias = true
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val text = text
+            val layout = layout ?: run { super.onDraw(canvas); return }
+
+            strokePaint.textSize = textSize
+            strokePaint.typeface = typeface
+
+            val lineCount = layout.lineCount
+            for (i in 0 until lineCount) {
+                val start = layout.getLineStart(i)
+                val end = layout.getLineEnd(i)
+                val line = text.subSequence(start, end)
+                val x = layout.getLineLeft(i) + paddingLeft
+                val y = layout.getLineBaseline(i).toFloat() + paddingTop
+                canvas.drawText(line.toString(), x, y, strokePaint)
+            }
+            super.onDraw(canvas)
         }
     }
 
@@ -176,9 +207,7 @@ class AudioCaptureService : Service() {
                 .addMatchingUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .build()
 
-            val minBufferSize = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT
-            )
+            val minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
             val bufferSize = maxOf(minBufferSize, BUFFER_SIZE)
 
             audioRecord = AudioRecord.Builder()
@@ -230,15 +259,10 @@ class AudioCaptureService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "字幕监听",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
+            val channel = NotificationChannel(CHANNEL_ID, "字幕监听", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "实时字幕翻译运行中"
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
