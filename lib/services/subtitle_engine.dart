@@ -120,9 +120,9 @@ class SubtitleEngine extends ChangeNotifier {
     await _overlayChannel.invokeMethod('hideOverlay');
 
     _vadSub?.cancel();
-    await _vad?.dispose();
-    await _stt?.dispose();
-    await _trans?.dispose();
+    _vad?.dispose();
+    if (_stt != null) await _stt!.dispose();
+    if (_trans != null) await _trans!.dispose();
 
     _vad = null;
     _stt = null;
