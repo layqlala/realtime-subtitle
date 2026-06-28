@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -15,7 +16,7 @@ class SubtitleEngine extends ChangeNotifier {
   VADProcessor? _vad;
   WhisperSTTEngine? _stt;
   TranslateEngine? _trans;
-  StreamSubscription<dynamic>? _vadSub;
+  StreamSubscription? _vadSub;
 
   bool _running = false;
   bool get isRunning => _running;
@@ -69,42 +70,47 @@ class SubtitleEngine extends ChangeNotifier {
       },
     );
 
-    _vadSub = vad.sentenceStream.listen(_onSentence(stt, trans, lang));
+    _vadSub = vad.sentenceStream.listen((sentence) {
+      _processSentence(sentence, stt, trans, lang);
+    });
 
     notifyListeners();
   }
 
-  void Function(List<int>) _onSentence(WhisperSTTEngine stt, TranslateEngine trans, String lang) {
-    return (sentence) async {
-      try {
-        _status = '识别中...';
-        notifyListeners();
+  Future<void> _processSentence(
+    List<int> sentence,
+    WhisperSTTEngine stt,
+    TranslateEngine trans,
+    String lang,
+  ) async {
+    try {
+      _status = '识别中...';
+      notifyListeners();
 
-        final text = await stt.transcribe(sentence, lang);
-        if (text.isEmpty) return;
+      final text = await stt.transcribe(sentence, lang);
+      if (text.isEmpty) return;
 
-        _originalText = text;
-        notifyListeners();
+      _originalText = text;
+      notifyListeners();
 
-        _status = '翻译中...';
-        notifyListeners();
+      _status = '翻译中...';
+      notifyListeners();
 
-        final translated = await trans.translate(text, lang);
-        _translatedText = translated;
+      final translated = await trans.translate(text, lang);
+      _translatedText = translated;
 
-        await _overlayChannel.invokeMethod('updateSubtitle', {
-          'original': text,
-          'translated': translated,
-        });
+      await _overlayChannel.invokeMethod('updateSubtitle', {
+        'original': text,
+        'translated': translated,
+      });
 
-        _status = '监听中...';
-        notifyListeners();
-      } catch (e) {
-        final msg = e.toString();
-        _status = '错误: ${msg.length > 50 ? msg.substring(0, 50) : msg}';
-        notifyListeners();
-      }
-    };
+      _status = '监听中...';
+      notifyListeners();
+    } catch (e) {
+      final msg = e.toString();
+      _status = '错误: ${msg.length > 50 ? msg.substring(0, 50) : msg}';
+      notifyListeners();
+    }
   }
 
   Future<void> stop() async {
