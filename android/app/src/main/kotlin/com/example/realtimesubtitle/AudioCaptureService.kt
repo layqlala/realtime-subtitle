@@ -166,9 +166,16 @@ class AudioCaptureService : Service() {
     private fun startCapturing(resultCode: Int, data: Intent) {
         try {
             val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = manager.getMediaProjection(resultCode, data)
+            // Fix #10: null-safe MediaProjection
+            val projection = manager.getMediaProjection(resultCode, data)
+            if (projection == null) {
+                MainActivity.instance?.sendCaptureError("MediaProjection is null")
+                stopSelf()
+                return
+            }
+            mediaProjection = projection
 
-            val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection!!)
+            val config = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
                 .addMatchingUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -192,6 +199,7 @@ class AudioCaptureService : Service() {
             audioRecord!!.startRecording()
             isCapturing.set(true)
 
+            // Fix #16: NORM_PRIORITY instead of MAX_PRIORITY
             captureThread = Thread {
                 val buffer = ByteArray(bufferSize)
                 while (isCapturing.get()) {
@@ -202,7 +210,7 @@ class AudioCaptureService : Service() {
                     }
                 }
             }
-            captureThread!!.priority = Thread.MAX_PRIORITY
+            captureThread!!.priority = Thread.NORM_PRIORITY
             captureThread!!.start()
         } catch (e: Exception) {
             MainActivity.instance?.sendCaptureError("Audio capture failed: ${e.message}")
@@ -212,8 +220,9 @@ class AudioCaptureService : Service() {
 
     override fun onDestroy() {
         isCapturing.set(false)
-        captureThread?.join(1000)
+        // Fix #3: stop AudioRecord BEFORE join to unblock read()
         audioRecord?.stop()
+        captureThread?.join(1000)
         audioRecord?.release()
         audioRecord = null
         mediaProjection?.stop()

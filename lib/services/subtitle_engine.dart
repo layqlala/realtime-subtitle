@@ -16,6 +16,7 @@ class SubtitleEngine extends ChangeNotifier {
   VADProcessor? _vad;
   WhisperSTTEngine? _stt;
   TranslateEngine? _trans;
+  StreamSubscription? _audioSub;  // Fix #4: store audio subscription
   StreamSubscription? _vadSub;
   String _lang = 'en';
 
@@ -29,6 +30,10 @@ class SubtitleEngine extends ChangeNotifier {
 
   String _status = '就绪';
   String get status => _status;
+
+  // Fix #6: serial queue for sentence processing
+  final List<List<int>> _sentenceQueue = [];
+  bool _processing = false;
 
   SubtitleEngine({required this.config});
 
@@ -51,7 +56,8 @@ class SubtitleEngine extends ChangeNotifier {
     );
 
     _vad = VADProcessor();
-    _lang = config.sourceLang == 'auto' ? 'en' : config.sourceLang;
+    // Fix #7: use null for auto-detect instead of hardcoding 'en'
+    _lang = config.sourceLang == 'auto' ? '' : config.sourceLang;
 
     await _overlayChannel.invokeMethod('showOverlay');
     await audioStream.startCapture();
@@ -61,7 +67,8 @@ class SubtitleEngine extends ChangeNotifier {
 
     final vad = _vad!;
 
-    audioStream.audioStream.listen(
+    // Fix #4: store subscription so we can cancel it
+    _audioSub = audioStream.audioStream.listen(
       (Uint8List chunk) => vad.feed(chunk.toList()),
       onError: (e) {
         _status = '错误: $e';
@@ -75,48 +82,73 @@ class SubtitleEngine extends ChangeNotifier {
   }
 
   void _onSentence(List<int> sentence) {
-    _processSentence(sentence);
+    // Fix #6: enqueue and process serially
+    _sentenceQueue.add(sentence);
+    _processNextSentence();
   }
 
-  Future<void> _processSentence(List<int> sentence) async {
-    final stt = _stt;
-    final trans = _trans;
-    if (stt == null || trans == null) return;
+  Future<void> _processNextSentence() async {
+    if (_processing || _sentenceQueue.isEmpty) return;
+    _processing = true;
 
+    final sentence = _sentenceQueue.removeAt(0);
     try {
-      _status = '识别中...';
-      notifyListeners();
-
-      final text = await stt.transcribe(sentence, _lang);
-      if (text.isEmpty) return;
-
-      _originalText = text;
-      notifyListeners();
-
-      _status = '翻译中...';
-      notifyListeners();
-
-      final translated = await trans.translate(text, _lang);
-      _translatedText = translated;
-
-      await _overlayChannel.invokeMethod('updateSubtitle', {
-        'original': text,
-        'translated': translated,
-      });
-
-      _status = '监听中...';
-      notifyListeners();
+      await _doProcessSentence(sentence);
     } catch (e) {
       final msg = e.toString();
       _status = '错误: ${msg.length > 50 ? msg.substring(0, 50) : msg}';
       notifyListeners();
+    } finally {
+      _processing = false;
+      // Process next if any arrived while we were busy
+      if (_sentenceQueue.isNotEmpty) {
+        _processNextSentence();
+      }
     }
+  }
+
+  Future<void> _doProcessSentence(List<int> sentence) async {
+    final stt = _stt;
+    final trans = _trans;
+    if (stt == null || trans == null) return;
+
+    _status = '识别中...';
+    notifyListeners();
+
+    final text = await stt.transcribe(sentence, _lang);
+    if (text.isEmpty) return;
+
+    _originalText = text;
+    notifyListeners();
+
+    _status = '翻译中...';
+    notifyListeners();
+
+    final translated = await trans.translate(text, _lang.isEmpty ? 'en' : _lang);
+    _translatedText = translated;
+
+    try {
+      await _overlayChannel.invokeMethod('updateSubtitle', {
+        'original': text,
+        'translated': translated,
+      });
+    } catch (_) {
+      // overlay may be gone if service stopped
+    }
+
+    _status = '监听中...';
+    notifyListeners();
   }
 
   Future<void> stop() async {
     if (!_running) return;
 
     await audioStream.stopCapture();
+
+    // Fix #4: cancel audio subscription
+    await _audioSub?.cancel();
+    _audioSub = null;
+
     await _overlayChannel.invokeMethod('hideOverlay');
 
     _vadSub?.cancel();
@@ -132,11 +164,15 @@ class SubtitleEngine extends ChangeNotifier {
     _originalText = '';
     _translatedText = '';
 
+    _sentenceQueue.clear();
+    _processing = false;
+
     notifyListeners();
   }
 
   @override
   void dispose() {
+    _audioSub?.cancel();
     _vadSub?.cancel();
     audioStream.dispose();
     super.dispose();

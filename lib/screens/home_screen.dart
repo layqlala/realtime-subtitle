@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/subtitle_engine.dart';
 import '../theme/anime_theme.dart';
@@ -15,6 +16,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  static const _audioChannel = MethodChannel('com.example.realtimesubtitle/audio');
+
   late SubtitleEngine _engine;
 
   final _sttApiKeyCtrl = TextEditingController();
@@ -71,29 +74,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Fix #5: 通过原生 channel 检查悬浮窗权限，用 ACTION_MANAGE_OVERLAY_PERMISSION 跳转设置页
   Future<bool> _ensureOverlayPermission() async {
     if (!Platform.isAndroid) return true;
 
-    final status = await Permission.systemAlertWindow.status;
-    if (status.isGranted) return true;
+    // 通过原生 channel 检查权限（比 permission_handler 更可靠）
+    final granted = await _audioChannel.invokeMethod<bool>('checkOverlayPermission') ?? false;
+    if (granted) return true;
 
     if (!mounted) return false;
 
+    // 弹窗说明 → 跳转系统设置页
     final shouldOpen = await showDialog<bool>(
       context: context,
       builder: (ctx) => _AnimeDialog(
         title: '需要悬浮窗权限',
-        content: '实时字幕需要悬浮窗权限才能在其他应用上方显示翻译字幕。\n\n请在接下来的系统设置页面中允许该权限。',
-        confirmLabel: '去开启',
+        content: '实时字幕需要悬浮窗权限才能在其他应用上方显示翻译字幕。\n\n请在接下来的系统设置页面中开启该权限。',
+        confirmLabel: '去设置',
         cancelLabel: '取消',
       ),
     );
 
     if (shouldOpen != true) return false;
 
-    await Permission.systemAlertWindow.request();
-    final granted = await Permission.systemAlertWindow.status;
-    return granted.isGranted;
+    // 直接调用原生 Intent 跳转到悬浮窗权限设置页
+    await _audioChannel.invokeMethod('openOverlaySettings');
+    _resumingFromSettings = true;
+
+    // 用户需要手动去设置页开启后返回
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请在设置页面中开启悬浮窗权限后返回'), duration: Duration(seconds: 3)),
+      );
+    }
+
+    return false;
   }
 
   Future<void> _startWithPermissions() async {
@@ -106,6 +121,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await Permission.notification.request();
     }
 
+    if (!mounted) return;
     await _saveConfig();
     await _engine.start();
   }
@@ -142,7 +158,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildHeader() {
     return Row(
       children: [
-        // 装饰圆
         Container(
           width: 52,
           height: 52,
@@ -185,7 +200,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       child: Row(
         children: [
-          // 状态指示灯
           Container(
             width: 12,
             height: 12,
@@ -193,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               shape: BoxShape.circle,
               color: running ? AnimeTheme.success : Colors.grey[300],
               boxShadow: running
-                  ? [BoxShadow(color: AnimeTheme.success.withOpacity(0.5), blurRadius: 8)]
+                  ? [BoxShadow(color: AnimeTheme.success.withValues(alpha: 0.5), blurRadius: 8)]
                   : null,
             ),
           ),
@@ -219,12 +233,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ],
             ),
           ),
-          // 小装饰
           if (running)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: AnimeTheme.success.withOpacity(0.15),
+                color: AnimeTheme.success.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(AnimeTheme.radiusS),
               ),
               child: const Text('活跃', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AnimeTheme.success)),
@@ -246,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: running
-                ? [AnimeTheme.danger, AnimeTheme.danger.withOpacity(0.8)]
+                ? [AnimeTheme.danger, AnimeTheme.danger.withValues(alpha: 0.8)]
                 : [AnimeTheme.sakura, AnimeTheme.sky],
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
@@ -254,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           borderRadius: BorderRadius.circular(AnimeTheme.radiusM),
           boxShadow: [
             BoxShadow(
-              color: (running ? AnimeTheme.danger : AnimeTheme.sakura).withOpacity(0.3),
+              color: (running ? AnimeTheme.danger : AnimeTheme.sakura).withValues(alpha: 0.3),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -275,7 +288,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ── 字幕预览气泡 ──
+  // ── 字幕预览 ──
   Widget _buildSubtitlePreview() {
     final original = _engine.originalText;
     final translated = _engine.translatedText;
@@ -321,25 +334,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const Text('设置', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AnimeTheme.charcoal)),
           const SizedBox(height: 14),
 
-          // 源语言
           const Text('源语言', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey)),
           const SizedBox(height: 6),
           _buildLangSelector(),
           const SizedBox(height: 14),
 
-          // 翻译引擎
           const Text('翻译引擎', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey)),
           const SizedBox(height: 6),
           _buildEngineSelector(),
           const SizedBox(height: 14),
 
-          // STT API Key
           _buildTextField('STT API Key', _sttApiKeyCtrl, obscure: true),
           const SizedBox(height: 10),
           _buildTextField('STT Base URL', _sttBaseUrlCtrl),
           const SizedBox(height: 14),
 
-          // 翻译 API Key (仅 custom)
           if (_transEngine == 'custom') ...[
             _buildTextField('翻译 API Key', _transApiKeyCtrl, obscure: true),
             const SizedBox(height: 10),
@@ -349,7 +358,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 10),
           ],
 
-          // 保存按钮
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -496,13 +504,12 @@ class _AnimeDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 装饰图标
             Container(
               width: 56,
               height: 56,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: const LinearGradient(
+                gradient: LinearGradient(
                   colors: [AnimeTheme.sakura, AnimeTheme.sky],
                 ),
               ),

@@ -6,6 +6,8 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity
@@ -19,11 +21,12 @@ class MainActivity : FlutterActivity() {
         private const val OVERLAY_CHANNEL = "com.example.realtimesubtitle/overlay"
         private const val REQUEST_MEDIA_PROJECTION = 1001
 
-        var instance: MainActivity? = null // ponytail: Service→Activity桥接，非泄漏（Service寿命≤Activity）
+        var instance: MainActivity? = null
     }
 
     private var pendingResult: MethodChannel.Result? = null
     private var audioEventSink: EventChannel.EventSink? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,9 +47,15 @@ class MainActivity : FlutterActivity() {
                         stopAudioCapture()
                         result.success(true)
                     }
-                    "requestOverlayPermission" -> {
-                        requestOverlayPermission()
-                        result.success(null)
+                    "checkOverlayPermission" -> {
+                        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            Settings.canDrawOverlays(this)
+                        } else true
+                        result.success(granted)
+                    }
+                    "openOverlaySettings" -> {
+                        openOverlaySettings()
+                        result.success(true)
                     }
                     else -> result.notImplemented()
                 }
@@ -89,15 +98,13 @@ class MainActivity : FlutterActivity() {
         startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION)
     }
 
-    private fun requestOverlayPermission() {
+    private fun openOverlaySettings() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent) // 不需要等result，系统设置页直接跳转
-            }
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
         }
     }
 
@@ -130,12 +137,17 @@ class MainActivity : FlutterActivity() {
         stopService(Intent(this, AudioCaptureService::class.java))
     }
 
+    // Fix #1: EventSink 必须在主线程调用
     fun sendAudioData(bytes: ByteArray) {
-        audioEventSink?.success(bytes)
+        mainHandler.post {
+            audioEventSink?.success(bytes)
+        }
     }
 
     fun sendCaptureError(error: String) {
-        audioEventSink?.error("CAPTURE_ERROR", error, null)
+        mainHandler.post {
+            audioEventSink?.error("CAPTURE_ERROR", error, null)
+        }
     }
 
     private fun showOverlay() {
