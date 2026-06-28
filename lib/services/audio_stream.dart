@@ -8,13 +8,9 @@ class AudioStreamService {
   static const _eventChannel = EventChannel('com.example.realtimesubtitle/audio/stream');
 
   Stream<Uint8List>? _audioStream;
-  StreamSubscription? _subscription;
 
-  /// 开始捕获系统音频，返回 PCM 16kHz 16bit mono 数据流
   Stream<Uint8List> get audioStream {
-    _audioStream ??= _eventChannel
-        .receiveBroadcastStream()
-        .map((data) => data is Uint8List ? data : Uint8List.fromList(data));
+    _audioStream ??= _eventChannel.receiveBroadcastStream().cast<Uint8List>();
     return _audioStream!;
   }
 
@@ -26,11 +22,7 @@ class AudioStreamService {
     await _channel.invokeMethod('stopCapture');
   }
 
-  Future<void> requestOverlayPermission() async {
-    await _channel.invokeMethod('requestOverlayPermission');
-  }
-
   void dispose() {
-    _subscription?.cancel();
+    _audioStream = null;
   }
 }

@@ -3,7 +3,6 @@ import 'package:http/http.dart' as http;
 
 /// 翻译引擎统一接口
 abstract class TranslateEngine {
-  /// 翻译文本，target 固定为 "zh"
   Future<String> translate(String text, String sourceLang);
   Future<void> dispose();
 }
@@ -11,6 +10,7 @@ abstract class TranslateEngine {
 /// LibreTranslate 免费翻译
 class LibreTranslateEngine implements TranslateEngine {
   final String baseUrl;
+  static const _timeout = Duration(seconds: 15);
   final http.Client _client = http.Client();
 
   LibreTranslateEngine({this.baseUrl = 'https://libretranslate.com'});
@@ -23,11 +23,11 @@ class LibreTranslateEngine implements TranslateEngine {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'q': text,
-          'source': sourceLang,
+          'source': sourceLang.isEmpty ? 'auto' : sourceLang,
           'target': 'zh',
           'format': 'text',
         }),
-      );
+      ).timeout(_timeout);
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -35,6 +35,8 @@ class LibreTranslateEngine implements TranslateEngine {
       } else {
         throw Exception('LibreTranslate error ${response.statusCode}');
       }
+    } on TimeoutException {
+      throw Exception('LibreTranslate timeout');
     } catch (e) {
       throw Exception('LibreTranslate failed: $e');
     }
@@ -46,21 +48,23 @@ class LibreTranslateEngine implements TranslateEngine {
 
 /// Google Translate 免费接口
 class GoogleTranslateEngine implements TranslateEngine {
+  static const _timeout = Duration(seconds: 15);
   final http.Client _client = http.Client();
 
   @override
   Future<String> translate(String text, String sourceLang) async {
     try {
+      // Fix: map empty/auto to 'auto' for Google
+      final sl = sourceLang.isEmpty ? 'auto' : sourceLang;
       final uri = Uri.parse(
         'https://translate.googleapis.com/translate_a/single'
-        '?client=gtx&sl=$sourceLang&tl=zh&dt=t&q=${Uri.encodeComponent(text)}',
+        '?client=gtx&sl=$sl&tl=zh&dt=t&q=${Uri.encodeComponent(text)}',
       );
 
-      final response = await _client.get(uri);
+      final response = await _client.get(uri).timeout(_timeout);
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        // 解析 [[["译文","原文",...]],...] 结构
         final parts = (data[0] as List)
             .where((e) => e is List && e.isNotEmpty)
             .map((e) => (e as List)[0].toString())
@@ -69,6 +73,8 @@ class GoogleTranslateEngine implements TranslateEngine {
       } else {
         throw Exception('Google Translate error ${response.statusCode}');
       }
+    } on TimeoutException {
+      throw Exception('Google Translate timeout');
     } catch (e) {
       throw Exception('Google Translate failed: $e');
     }
@@ -83,6 +89,7 @@ class CustomAPITranslateEngine implements TranslateEngine {
   final String apiKey;
   final String baseUrl;
   final String model;
+  static const _timeout = Duration(seconds: 30);
   final http.Client _client = http.Client();
 
   CustomAPITranslateEngine({
@@ -94,7 +101,11 @@ class CustomAPITranslateEngine implements TranslateEngine {
   @override
   Future<String> translate(String text, String sourceLang) async {
     try {
-      final langName = sourceLang == 'en' ? 'English' : 'Japanese';
+      final langName = switch (sourceLang) {
+        'ja' => 'Japanese',
+        'en' => 'English',
+        _ => 'English or Japanese',
+      };
       final response = await _client.post(
         Uri.parse('$baseUrl/chat/completions'),
         headers: {
@@ -113,7 +124,7 @@ class CustomAPITranslateEngine implements TranslateEngine {
           'temperature': 0.3,
           'max_tokens': 500,
         }),
-      );
+      ).timeout(_timeout);
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -121,6 +132,8 @@ class CustomAPITranslateEngine implements TranslateEngine {
       } else {
         throw Exception('API error ${response.statusCode}: ${response.body}');
       }
+    } on TimeoutException {
+      throw Exception('Custom API timeout');
     } catch (e) {
       throw Exception('Custom API failed: $e');
     }
@@ -175,7 +188,7 @@ TranslateEngine buildTranslateEngine({
         engines.add(CustomAPITranslateEngine(
           apiKey: apiKey,
           baseUrl: baseUrl ?? 'https://api.openai.com/v1',
-          model: model ?? 'gpt-3.5-turbo',
+          model: (model != null && model.isNotEmpty) ? model : 'gpt-3.5-turbo',
         ));
       }
       engines.add(GoogleTranslateEngine());

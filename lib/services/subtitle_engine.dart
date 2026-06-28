@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -28,7 +28,7 @@ class SubtitleEngine extends ChangeNotifier {
   String get originalText => _originalText;
   String get translatedText => _translatedText;
 
-  String _status = '就绪';
+  String _status = '灏辩华';
   String get status => _status;
 
   // Fix #6: serial queue for sentence processing
@@ -40,7 +40,7 @@ class SubtitleEngine extends ChangeNotifier {
   Future<void> start() async {
     if (_running) return;
 
-    _status = '初始化引擎...';
+    _status = '鍒濆鍖栧紩鎿?..';
     notifyListeners();
 
     _stt = WhisperSTTEngine(
@@ -63,7 +63,7 @@ class SubtitleEngine extends ChangeNotifier {
     await audioStream.startCapture();
 
     _running = true;
-    _status = '监听中...';
+    _status = '鐩戝惉涓?..';
 
     final vad = _vad!;
 
@@ -71,7 +71,7 @@ class SubtitleEngine extends ChangeNotifier {
     _audioSub = audioStream.audioStream.listen(
       (Uint8List chunk) => vad.feed(chunk.toList()),
       onError: (e) {
-        _status = '错误: $e';
+        _status = '閿欒: $e';
         notifyListeners();
       },
     );
@@ -96,7 +96,7 @@ class SubtitleEngine extends ChangeNotifier {
       await _doProcessSentence(sentence);
     } catch (e) {
       final msg = e.toString();
-      _status = '错误: ${msg.length > 50 ? msg.substring(0, 50) : msg}';
+      _status = '閿欒: ${msg.length > 50 ? msg.substring(0, 50) : msg}';
       notifyListeners();
     } finally {
       _processing = false;
@@ -112,7 +112,7 @@ class SubtitleEngine extends ChangeNotifier {
     final trans = _trans;
     if (stt == null || trans == null) return;
 
-    _status = '识别中...';
+    _status = '璇嗗埆涓?..';
     notifyListeners();
 
     final text = await stt.transcribe(sentence, _lang);
@@ -121,10 +121,10 @@ class SubtitleEngine extends ChangeNotifier {
     _originalText = text;
     notifyListeners();
 
-    _status = '翻译中...';
+    _status = '缈昏瘧涓?..';
     notifyListeners();
 
-    final translated = await trans.translate(text, _lang.isEmpty ? 'en' : _lang);
+    final translated = await trans.translate(text, _lang);
     _translatedText = translated;
 
     try {
@@ -136,7 +136,7 @@ class SubtitleEngine extends ChangeNotifier {
       // overlay may be gone if service stopped
     }
 
-    _status = '监听中...';
+    _status = '鐩戝惉涓?..';
     notifyListeners();
   }
 
@@ -160,7 +160,7 @@ class SubtitleEngine extends ChangeNotifier {
     _stt = null;
     _trans = null;
     _running = false;
-    _status = '已停止';
+    _status = '宸插仠姝?;
     _originalText = '';
     _translatedText = '';
 

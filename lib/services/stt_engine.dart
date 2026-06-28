@@ -6,6 +6,8 @@ class WhisperSTTEngine {
   final String apiKey;
   final String baseUrl;
 
+  static const _timeout = Duration(seconds: 30);
+
   final http.Client _client = http.Client();
 
   WhisperSTTEngine({
@@ -21,7 +23,6 @@ class WhisperSTTEngine {
       final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer $apiKey'
         ..fields['model'] = 'whisper-1'
-        ..fields['language'] = language
         ..fields['response_format'] = 'text'
         ..files.add(
           http.MultipartFile.fromBytes(
@@ -31,7 +32,12 @@ class WhisperSTTEngine {
           ),
         );
 
-      final response = await _client.send(request);
+      // Fix: only send language when explicitly set (empty = auto-detect)
+      if (language.isNotEmpty) {
+        request.fields['language'] = language;
+      }
+
+      final response = await _client.send(request).timeout(_timeout);
       final body = await response.stream.bytesToString();
 
       if (response.statusCode == 200) {
@@ -39,6 +45,8 @@ class WhisperSTTEngine {
       } else {
         throw Exception('Whisper API error ${response.statusCode}: $body');
       }
+    } on TimeoutException {
+      throw Exception('STT timeout: Whisper API did not respond within 30s');
     } catch (e) {
       throw Exception('STT failed: $e');
     }
