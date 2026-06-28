@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- 悬浮窗 -->
+    <!-- 悬浮�?-->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- 网络 -->
@@ -14,7 +14,7 @@
 
     <application
         android:label="实时字幕"
-        android:icon="@mipmap/ic_launcher"
+        
         android:usesCleartextTraffic="true">
 
         <activity
