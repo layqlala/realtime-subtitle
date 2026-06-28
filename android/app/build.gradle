@@ -19,7 +19,7 @@ android {
 
     defaultConfig {
         applicationId "com.example.realtimesubtitle"
-        minSdk 29      // Android 10+ for AudioPlaybackCapture
+        minSdk 29
         targetSdk 34
         versionCode 1
         versionName "1.0.0"
@@ -29,6 +29,7 @@ android {
         release {
             signingConfig signingConfigs.debug
             minifyEnabled false
+            shrinkResources false
         }
     }
 }
