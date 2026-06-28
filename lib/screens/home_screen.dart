@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/subtitle_engine.dart';
+import '../theme/anime_theme.dart';
 import '../utils/config.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -80,13 +81,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final shouldOpen = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('需要悬浮窗权限'),
-        content: const Text('实时字幕需要悬浮窗权限才能在其他应用上方显示翻译字幕。\n\n请在接下来的系统设置页面中允许该权限。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去开启')),
-        ],
+      builder: (ctx) => _AnimeDialog(
+        title: '需要悬浮窗权限',
+        content: '实时字幕需要悬浮窗权限才能在其他应用上方显示翻译字幕。\n\n请在接下来的系统设置页面中允许该权限。',
+        confirmLabel: '去开启',
+        cancelLabel: '取消',
       ),
     );
 
@@ -94,195 +93,181 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     await Permission.systemAlertWindow.request();
     final granted = await Permission.systemAlertWindow.status;
-
-    if (!granted.isGranted && mounted) {
-      final openSettings = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('权限未开启'),
-          content: const Text('悬浮窗权限尚未开启，实时字幕无法显示。\n\n是否手动前往系统设置页面开启该权限？'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('暂不')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去设置')),
-          ],
-        ),
-      );
-
-      if (openSettings == true) {
-        await openAppSettings();
-        _resumingFromSettings = true;
-      }
-
-      return false;
-    }
-
     return granted.isGranted;
   }
 
-  Future<bool> _ensureNotificationPermission() async {
-    if (!Platform.isAndroid) return true;
-
-    final status = await Permission.notification.status;
-    if (status.isGranted) return true;
-
-    final requested = await Permission.notification.request();
-    return requested.isGranted;
-  }
-
   Future<void> _startWithPermissions() async {
-    final overlayReady = await _ensureOverlayPermission();
-    if (!overlayReady) return;
+    if (!mounted) return;
+    final overlayOk = await _ensureOverlayPermission();
+    if (!overlayOk) return;
 
-    final notificationReady = await _ensureNotificationPermission();
-    if (!notificationReady) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('通知权限未授予，Android 13+ 无法稳定运行前台服务')),
-      );
+    // 请求通知权限
+    if (Platform.isAndroid) {
+      await Permission.notification.request();
     }
 
+    await _saveConfig();
     await _engine.start();
   }
+
+  // ── UI 构建 ──
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('实时字幕翻译'),
-        centerTitle: true,
+      backgroundColor: AnimeTheme.cream,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: Column(
+            children: [
+              _buildHeader(),
+              const SizedBox(height: 16),
+              _buildStatusCard(),
+              const SizedBox(height: 16),
+              _buildControlButton(),
+              const SizedBox(height: 16),
+              _buildSubtitlePreview(),
+              const SizedBox(height: 20),
+              _buildSettingsPanel(),
+              const SizedBox(height: 30),
+            ],
+          ),
+        ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+    );
+  }
+
+  // ── 头部 ──
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        // 装饰圆
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              colors: [AnimeTheme.sakura, AnimeTheme.sky],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: AnimeTheme.softShadow,
+          ),
+          child: const Icon(Icons.mic_rounded, color: Colors.white, size: 26),
+        ),
+        const SizedBox(width: 14),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('实时字幕', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AnimeTheme.charcoal)),
+              SizedBox(height: 2),
+              Text('监听系统声音 · 自动翻译字幕', style: TextStyle(fontSize: 13, color: Colors.grey)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── 状态卡片 ──
+  Widget _buildStatusCard() {
+    final running = _engine.isRunning;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AnimeTheme.radiusM),
+        boxShadow: AnimeTheme.softShadow,
+      ),
+      child: Row(
         children: [
-          _buildStatusCard(),
-          const SizedBox(height: 16),
-          _buildControlButton(),
-          const SizedBox(height: 24),
-          _buildSection('源语言'),
-          _buildLanguageSelector(),
-          const SizedBox(height: 16),
-          _buildSection('语音识别 (STT)'),
-          _buildSTTSettings(),
-          const SizedBox(height: 16),
-          _buildSection('翻译引擎'),
-          _buildTransSettings(),
-          const SizedBox(height: 24),
-          _buildSaveButton(),
-          const SizedBox(height: 16),
-          if (_engine.originalText.isNotEmpty) ...[
-            _buildSection('当前字幕'),
-            _buildSubtitlePreview(),
-          ],
+          // 状态指示灯
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: running ? AnimeTheme.success : Colors.grey[300],
+              boxShadow: running
+                  ? [BoxShadow(color: AnimeTheme.success.withOpacity(0.5), blurRadius: 8)]
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  running ? '监听中' : '就绪',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: running ? AnimeTheme.charcoal : Colors.grey[500],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _engine.status,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          // 小装饰
+          if (running)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AnimeTheme.success.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(AnimeTheme.radiusS),
+              ),
+              child: const Text('活跃', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AnimeTheme.success)),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildStatusCard() {
-    Color statusColor;
-    if (_engine.status.contains('错误')) {
-      statusColor = Colors.red;
-    } else if (_engine.isRunning) {
-      statusColor = Colors.green;
-    } else {
-      statusColor = Colors.grey;
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: statusColor,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _engine.status,
-                style: const TextStyle(fontSize: 16),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // ── 控制按钮 ──
   Widget _buildControlButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: ElevatedButton.icon(
-        onPressed: _engine.isRunning
-            ? _engine.stop
-            : () async {
-                await _saveConfig();
-                await _startWithPermissions();
-              },
-        icon: Icon(_engine.isRunning ? Icons.stop : Icons.play_arrow, size: 28),
-        label: Text(
-          _engine.isRunning ? '停止监听' : '开始监听',
-          style: const TextStyle(fontSize: 18),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _engine.isRunning ? Colors.red : Colors.blue,
-          foregroundColor: Colors.white,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSection(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(title, style: const TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w600)),
-    );
-  }
-
-  Widget _buildLanguageSelector() {
-    return SegmentedButton<String>(
-      segments: const [
-        ButtonSegment(value: 'auto', label: Text('自动检测')),
-        ButtonSegment(value: 'en', label: Text('英文')),
-        ButtonSegment(value: 'ja', label: Text('日语')),
-      ],
-      selected: {_sourceLang},
-      onSelectionChanged: (v) => setState(() => _sourceLang = v.first),
-    );
-  }
-
-  Widget _buildSTTSettings() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('引擎: Whisper API', style: TextStyle(fontWeight: FontWeight.w500)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _sttApiKeyCtrl,
-              decoration: const InputDecoration(
-                labelText: 'API Key',
-                hintText: 'sk-...',
-                border: OutlineInputBorder(),
-              ),
-              obscureText: true,
+    final running = _engine.isRunning;
+    return GestureDetector(
+      onTap: running ? () => _engine.stop() : _startWithPermissions,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: running
+                ? [AnimeTheme.danger, AnimeTheme.danger.withOpacity(0.8)]
+                : [AnimeTheme.sakura, AnimeTheme.sky],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(AnimeTheme.radiusM),
+          boxShadow: [
+            BoxShadow(
+              color: (running ? AnimeTheme.danger : AnimeTheme.sakura).withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _sttBaseUrlCtrl,
-              decoration: const InputDecoration(
-                labelText: '自定义 Base URL (可选)',
-                hintText: 'https://api.openai.com/v1',
-                border: OutlineInputBorder(),
-              ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(running ? Icons.stop_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 22),
+            const SizedBox(width: 8),
+            Text(
+              running ? '停止监听' : '开始监听',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white),
             ),
           ],
         ),
@@ -290,103 +275,264 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildTransSettings() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            DropdownButtonFormField<String>(
-              value: _transEngine,
-              decoration: const InputDecoration(
-                labelText: '引擎',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              ),
-              items: const [
-                DropdownMenuItem(value: 'google', child: Text('Google 翻译 (免费)')),
-                DropdownMenuItem(value: 'libre', child: Text('LibreTranslate (免费)')),
-                DropdownMenuItem(value: 'custom', child: Text('自定义 API')),
-              ],
-              onChanged: (v) => setState(() => _transEngine = v!),
-            ),
-            const SizedBox(height: 8),
-            Text('目标语言：简体中文', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-            if (_transEngine == 'custom') ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _transApiKeyCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'API Key',
-                  hintText: 'sk-...',
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _transBaseUrlCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Base URL',
-                  hintText: 'https://api.openai.com/v1',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _transModelCtrl,
-                decoration: const InputDecoration(
-                  labelText: '模型',
-                  hintText: 'gpt-3.5-turbo',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSaveButton() {
-    return OutlinedButton.icon(
-      onPressed: _saveConfig,
-      icon: const Icon(Icons.save),
-      label: const Text('保存设置'),
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(double.infinity, 48),
-      ),
-    );
-  }
-
+  // ── 字幕预览气泡 ──
   Widget _buildSubtitlePreview() {
-    return Card(
-      color: Colors.black87,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_engine.originalText, style: const TextStyle(color: Colors.white, fontSize: 16)),
+    final original = _engine.originalText;
+    final translated = _engine.translatedText;
+    if (original.isEmpty && translated.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AnimeTheme.charcoal,
+        borderRadius: BorderRadius.circular(AnimeTheme.radiusM),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (original.isNotEmpty) ...[
+            Text(original, style: const TextStyle(fontSize: 14, color: Colors.white70)),
             const SizedBox(height: 8),
-            Text(_engine.translatedText, style: const TextStyle(color: Colors.yellow, fontSize: 18)),
           ],
+          if (translated.isNotEmpty)
+            Text(
+              translated,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AnimeTheme.subtitle),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── 设置面板 ──
+  Widget _buildSettingsPanel() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AnimeTheme.radiusM),
+        boxShadow: AnimeTheme.softShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('设置', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AnimeTheme.charcoal)),
+          const SizedBox(height: 14),
+
+          // 源语言
+          const Text('源语言', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const SizedBox(height: 6),
+          _buildLangSelector(),
+          const SizedBox(height: 14),
+
+          // 翻译引擎
+          const Text('翻译引擎', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const SizedBox(height: 6),
+          _buildEngineSelector(),
+          const SizedBox(height: 14),
+
+          // STT API Key
+          _buildTextField('STT API Key', _sttApiKeyCtrl, obscure: true),
+          const SizedBox(height: 10),
+          _buildTextField('STT Base URL', _sttBaseUrlCtrl),
+          const SizedBox(height: 14),
+
+          // 翻译 API Key (仅 custom)
+          if (_transEngine == 'custom') ...[
+            _buildTextField('翻译 API Key', _transApiKeyCtrl, obscure: true),
+            const SizedBox(height: 10),
+            _buildTextField('翻译 Base URL', _transBaseUrlCtrl),
+            const SizedBox(height: 10),
+            _buildTextField('翻译 Model', _transModelCtrl),
+            const SizedBox(height: 10),
+          ],
+
+          // 保存按钮
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _saveConfig,
+              child: const Text('保存设置'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 语言选择器 ──
+  Widget _buildLangSelector() {
+    return Row(
+      children: [
+        _buildLangChip('自动', 'auto'),
+        const SizedBox(width: 8),
+        _buildLangChip('英语', 'en'),
+        const SizedBox(width: 8),
+        _buildLangChip('日语', 'ja'),
+      ],
+    );
+  }
+
+  Widget _buildLangChip(String label, String value) {
+    final selected = _sourceLang == value;
+    return GestureDetector(
+      onTap: () => setState(() => _sourceLang = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AnimeTheme.sakura : AnimeTheme.creamDark,
+          borderRadius: BorderRadius.circular(AnimeTheme.radiusS),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : AnimeTheme.charcoal,
+          ),
         ),
       ),
+    );
+  }
+
+  // ── 引擎选择器 ──
+  Widget _buildEngineSelector() {
+    return Row(
+      children: [
+        _buildEngineChip('Google', 'google'),
+        const SizedBox(width: 8),
+        _buildEngineChip('Libre', 'libre'),
+        const SizedBox(width: 8),
+        _buildEngineChip('自定义', 'custom'),
+      ],
+    );
+  }
+
+  Widget _buildEngineChip(String label, String value) {
+    final selected = _transEngine == value;
+    return GestureDetector(
+      onTap: () => setState(() => _transEngine = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AnimeTheme.sky : AnimeTheme.creamDark,
+          borderRadius: BorderRadius.circular(AnimeTheme.radiusS),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : AnimeTheme.charcoal,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── 输入框 ──
+  Widget _buildTextField(String label, TextEditingController ctrl, {bool obscure = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: ctrl,
+          obscureText: obscure,
+          decoration: InputDecoration(
+            hintText: label,
+            filled: true,
+            fillColor: AnimeTheme.creamDark,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AnimeTheme.radiusS),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AnimeTheme.radiusS),
+              borderSide: const BorderSide(color: AnimeTheme.sakura, width: 1.5),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _engine.removeListener(_onEngineChanged);
+    _engine.dispose();
     _sttApiKeyCtrl.dispose();
     _sttBaseUrlCtrl.dispose();
     _transApiKeyCtrl.dispose();
     _transBaseUrlCtrl.dispose();
     _transModelCtrl.dispose();
-    _engine.dispose();
     super.dispose();
+  }
+}
+
+// ── 二次元风格弹窗 ──
+class _AnimeDialog extends StatelessWidget {
+  final String title;
+  final String content;
+  final String confirmLabel;
+  final String cancelLabel;
+
+  const _AnimeDialog({
+    required this.title,
+    required this.content,
+    required this.confirmLabel,
+    required this.cancelLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnimeTheme.radiusL)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 装饰图标
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [AnimeTheme.sakura, AnimeTheme.sky],
+                ),
+              ),
+              child: const Icon(Icons.info_outline_rounded, color: Colors.white, size: 28),
+            ),
+            const SizedBox(height: 16),
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AnimeTheme.charcoal)),
+            const SizedBox(height: 10),
+            Text(content, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: Text(cancelLabel),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: Text(confirmLabel),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

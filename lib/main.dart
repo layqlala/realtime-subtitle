@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
+import 'theme/anime_theme.dart';
 import 'utils/config.dart';
 
 void main() async {
@@ -17,11 +18,7 @@ class RealTimeSubtitleApp extends StatelessWidget {
     return MaterialApp(
       title: '实时字幕',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: Colors.blue,
-        useMaterial3: true,
-        brightness: Brightness.light,
-      ),
+      theme: AnimeTheme.light,
       home: HomeScreen(config: config),
     );
   }
