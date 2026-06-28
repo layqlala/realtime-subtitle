@@ -3,9 +3,7 @@ package com.example.realtimesubtitle
 import android.app.*
 import android.content.Context
 import android.content.Intent
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -52,7 +50,6 @@ class AudioCaptureService : Service() {
             val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             windowManager = wm
 
-            // 背景完全透明的容器
             val layout = LinearLayout(appContext).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(Color.TRANSPARENT)
@@ -61,18 +58,17 @@ class AudioCaptureService : Service() {
                 setPadding(hPad, vPad, hPad, vPad)
             }
 
-            // 带黑色描边的白色字幕，保证在任何背景下都可读
-            originalTextView = StrokedTextView(appContext).apply {
+            originalTextView = TextView(appContext).apply {
                 text = PLACEHOLDER_ORIGINAL
                 textSize = 15f
                 setTextColor(Color.WHITE)
                 isSingleLine = false
                 maxLines = 2
             }
-            translatedTextView = StrokedTextView(appContext).apply {
+            translatedTextView = TextView(appContext).apply {
                 text = PLACEHOLDER_TRANSLATED
                 textSize = 19f
-                setTextColor(Color.parseColor("#FFFFF3B0")) // 柔黄
+                setTextColor(Color.WHITE)
                 isSingleLine = false
                 maxLines = 2
             }
@@ -122,35 +118,6 @@ class AudioCaptureService : Service() {
                 originalTextView?.text = safeOriginal
                 translatedTextView?.text = safeTranslated
             }
-        }
-    }
-
-    // ── 描边 TextView：白字黑边，在任何背景下都清晰可读 ──
-    private class StrokedTextView(context: Context) : TextView(context) {
-        private val strokePaint = Paint().apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 5f
-            color = Color.argb(180, 0, 0, 0)
-            isAntiAlias = true
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            val text = text
-            val layout = layout ?: run { super.onDraw(canvas); return }
-
-            strokePaint.textSize = textSize
-            strokePaint.typeface = typeface
-
-            val lineCount = layout.lineCount
-            for (i in 0 until lineCount) {
-                val start = layout.getLineStart(i)
-                val end = layout.getLineEnd(i)
-                val line = text.subSequence(start, end)
-                val x = layout.getLineLeft(i) + paddingLeft
-                val y = layout.getLineBaseline(i).toFloat() + paddingTop
-                canvas.drawText(line.toString(), x, y, strokePaint)
-            }
-            super.onDraw(canvas)
         }
     }
 
