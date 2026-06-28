@@ -1,34 +1,34 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
-/// 二次元简约风配色
-/// 主色：柔粉  辅色：天蓝  背景：奶白  文字：深灰
+/// 浜屾鍏冪畝绾﹂閰嶈壊
+/// 涓昏壊锛氭煍绮? 杈呰壊锛氬ぉ钃? 鑳屾櫙锛氬ザ鐧? 鏂囧瓧锛氭繁鐏?
 class AnimeTheme {
   AnimeTheme._();
 
-  // ── 配色 ──
-  static const sakura = Color(0xFFFFB7C5);       // 樱花粉
-  static const sakuraDark = Color(0xFFE8889E);   // 深樱粉
-  static const sky = Color(0xFF87CEEB);           // 天蓝
-  static const skyDark = Color(0xFF5BA3C9);       // 深天蓝
-  static const lavender = Color(0xFFC3B1E1);      // 薰衣草紫
-  static const cream = Color(0xFFFFF8F0);         // 奶白
-  static const creamDark = Color(0xFFF5EDE3);     // 深奶白
-  static const charcoal = Color(0xFF2D2D3A);      // 深灰文字
-  static const subtitle = Color(0xFFFFF3B0);      // 字幕黄
-  static const danger = Color(0xFFFF6B6B);        // 危险红
-  static const success = Color(0xFF7EC8A0);       // 成功绿
+  // 鈹€鈹€ 閰嶈壊 鈹€鈹€
+  static const sakura = Color(0xFFFFB7C5);       // 妯辫姳绮?
+  static const sakuraDark = Color(0xFFE8889E);   // 娣辨ū绮?
+  static const sky = Color(0xFF87CEEB);           // 澶╄摑
+  static const skyDark = Color(0xFF5BA3C9);       // 娣卞ぉ钃?
+  static const lavender = Color(0xFFC3B1E1);      // 钖拌。鑽夌传
+  static const cream = Color(0xFFFFF8F0);         // 濂剁櫧
+  static const creamDark = Color(0xFFF5EDE3);     // 娣卞ザ鐧?
+  static const charcoal = Color(0xFF2D2D3A);      // 娣辩伆鏂囧瓧
+  static const subtitle = Color(0xFFFFF3B0);      // 瀛楀箷榛?
+  static const danger = Color(0xFFFF6B6B);        // 鍗遍櫓绾?
+  static const success = Color(0xFF7EC8A0);       // 鎴愬姛缁?
 
-  // ── 圆角 ──
+  // 鈹€鈹€ 鍦嗚 鈹€鈹€
   static const radiusL = 20.0;
   static const radiusM = 14.0;
   static const radiusS = 10.0;
 
-  // ── 阴影 ──
+  // 鈹€鈹€ 闃村奖 鈹€鈹€
   static List<BoxShadow> get softShadow => [
     BoxShadow(color: sakura.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4)),
   ];
 
-  // ── ThemeData ──
+  // 鈹€鈹€ ThemeData 鈹€鈹€
   static ThemeData get light {
     return ThemeData(
       useMaterial3: true,
@@ -47,7 +47,7 @@ class AnimeTheme {
         ),
         iconTheme: IconThemeData(color: charcoal),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: Colors.white,
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusM)),
